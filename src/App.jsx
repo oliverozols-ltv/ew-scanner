@@ -25,27 +25,32 @@ function App() {
       </button>
 
       <table border="1" cellPadding="10">
-        <thead>
-          <tr>
-            <th>Race</th>
-            <th>Horse</th>
-            <th>Bookmaker Odds</th>
-            <th>Exchange Lay Odds</th>
-            <th>EV</th>
-          </tr>
-        </thead>
-        <tbody>
-          {races.map((r, i) => (
-            <tr key={i}>
-              <td>{r.race}</td>
-              <td>{r.horse}</td>
-              <td>{r.bookmakerOdds}</td>
-              <td>{r.exchangeLayOdds}</td>
-              <td>{r.ev}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+  <thead>
+    <tr>
+      <th>Race</th>
+      <th>Horse</th>
+      <th>Win Odds</th>
+      <th>Place Terms</th>
+      <th>Lay Win</th>
+      <th>Lay Place</th>
+      <th>EV</th>
+    </tr>
+  </thead>
+  <tbody>
+    {races.map((r, i) => (
+      <tr key={i}>
+        <td>{r.race}</td>
+        <td>{r.horse}</td>
+        <td>{r.winOdds}</td>
+        <td>{`${r.placeFraction} x ${r.placesPaid}`}</td>
+        <td>{r.layWin}</td>
+        <td>{r.layPlace}</td>
+        <td>{r.ev}</td>
+      </tr>
+    ))}
+  </tbody>
+</table>
+
     </div>
   );
 }
