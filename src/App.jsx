@@ -1,4 +1,6 @@
 import { useState, useEffect } from "react";
+import "./styles.css";
+
 
 function App() {
   // -----------------------------
@@ -46,7 +48,8 @@ function App() {
   // RENDER
   // -----------------------------
   return (
-    <div style={{ padding: "40px", fontFamily: "Arial" }}>
+    <div className="container">
+
       <h1>Each-Way Value Scanner</h1>
 
       <button
@@ -98,16 +101,18 @@ function App() {
               <td>{`${r.placeFraction} x ${r.placesPaid}`}</td>
               <td>{r.layWin}</td>
               <td>{r.layPlace}</td>
-
-              <td
-                style={{
-                  color: parseFloat(r.ev) > 0 ? "green" : "red",
-                  fontWeight:
-                    parseFloat(r.ev) > 5 ? "bold" : "normal",
-                }}
-              >
-                {r.ev}
+              <td>
+                <span
+                  className={
+                    "ev-badge " +
+                    (parseFloat(r.ev) > 0 ? "ev-positive" : "ev-negative")
+                  }
+                  >
+                  {r.ev}
+                </span>
               </td>
+
+             
             </tr>
           ))}
         </tbody>
