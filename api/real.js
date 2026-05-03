@@ -48,7 +48,7 @@ async function getBetfairLayOdds(marketId, selectionId) {
 }
 
 // -----------------------------
-// Betfair JSON-RPC: get UK horse racing markets
+// Betfair JSON-RPC: get UK horse racing WIN markets
 // -----------------------------
 async function getBetfairMarkets() {
   const url = "https://api.betfair.com/exchange/betting/json-rpc/v1";
@@ -63,7 +63,7 @@ async function getBetfairMarkets() {
         marketTypeCodes: ["WIN"]    // Win markets
       },
       maxResults: 200,
-      marketProjection: ["RUNNER_DESCRIPTION"]
+      marketProjection: ["RUNNER_DESCRIPTION", "MARKET_START_TIME", "EVENT"]
     },
     id: 1
   };
@@ -90,8 +90,8 @@ async function getBetfairMarkets() {
 function findMatchingRunner(betfairMarket, horseName) {
   if (!betfairMarket?.runners) return null;
   const target = horseName.toLowerCase();
-  return betfairMarket.runners.find(r =>
-    r.runnerName && r.runnerName.toLowerCase().includes(target)
+  return betfairMarket.runners.find(
+    r => r.runnerName && r.runnerName.toLowerCase().includes(target)
   );
 }
 
@@ -109,10 +109,11 @@ function findMatchingMarket(betfairMarkets, event) {
 
   const target = name.toLowerCase();
 
-  return betfairMarkets.find(m =>
-    m.event &&
-    m.event.name &&
-    m.event.name.toLowerCase().includes(target)
+  return betfairMarkets.find(
+    m =>
+      m.event &&
+      m.event.name &&
+      m.event.name.toLowerCase().includes(target)
   );
 }
 
@@ -121,22 +122,38 @@ function findMatchingMarket(betfairMarkets, event) {
 // -----------------------------
 export default async function handler(req, res) {
   try {
-    // 1. Fetch bookmaker odds (all horse racing events)
+    // 1. Compute tomorrow's date (YYYY-MM-DD)
+    const now = new Date();
+    const tomorrow = new Date(now);
+    tomorrow.setDate(now.getDate() + 1);
+
+    const yyyy = tomorrow.getFullYear();
+    const mm = String(tomorrow.getMonth() + 1).padStart(2, "0");
+    const dd = String(tomorrow.getDate()).padStart(2, "0");
+
+    const tomorrowDate = `${yyyy}-${mm}-${dd}`;
+
+    // 2. Fetch bookmaker odds for tomorrow (UK horse racing)
     const oddsRes = await fetch(
-      `https://api.the-odds-api.com/v4/sports/horse_racing/odds/?apiKey=${process.env.ODDS_API_KEY}&regions=uk`
+      `https://api.the-odds-api.com/v4/sports/horse_racing/odds/?apiKey=${process.env.ODDS_API_KEY}&regions=uk&date=${tomorrowDate}`
     );
+
     const oddsData = await oddsRes.json();
 
     if (!Array.isArray(oddsData) || oddsData.length === 0) {
       return res.status(200).json([]);
     }
 
-    // 2. Fetch Betfair markets (UK horse racing)
-    const betfairMarkets = await getBetfairMarkets();
+    // 3. Fetch Betfair markets (all UK WIN), then filter to tomorrow
+    const allBetfairMarkets = await getBetfairMarkets();
+
+    const betfairMarkets = allBetfairMarkets.filter(
+      m => m.marketStartTime && m.marketStartTime.startsWith(tomorrowDate)
+    );
 
     const races = [];
 
-    // 3. For each event from Odds API, build rows per horse
+    // 4. Loop through all bookmaker races
     for (const event of oddsData) {
       const raceName = event.home_team || event.id || "Unknown Race";
 
@@ -148,7 +165,7 @@ export default async function handler(req, res) {
       const winMarket = bookmaker.markets[0];
       if (!winMarket.outcomes) continue;
 
-      // Try to find a matching Betfair market for this race
+      // Try to find matching Betfair market
       const betfairMarket = findMatchingMarket(betfairMarkets, event);
 
       for (const outcome of winMarket.outcomes) {
@@ -170,16 +187,12 @@ export default async function handler(req, res) {
           }
         }
 
-        // Simple default EW terms for now (can refine later)
-        const placeFraction = 1 / 5;
-        const placesPaid = 3;
-
         races.push({
           race: raceName,
           horse: horseName,
           winOdds,
-          placeFraction,
-          placesPaid,
+          placeFraction: 1 / 5,
+          placesPaid: 3,
           layWin,
           layPlace,
           commission: 0.02
@@ -195,4 +208,3 @@ export default async function handler(req, res) {
     });
   }
 }
-
