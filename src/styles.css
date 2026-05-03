@@ -1,3 +1,6 @@
+/* ------------------------------
+   GLOBAL PAGE STYLING
+--------------------------------*/
 body {
   background: #f5f5f5;
   margin: 0;
@@ -5,6 +8,9 @@ body {
   font-family: Arial, sans-serif;
 }
 
+/* ------------------------------
+   MAIN CONTAINER
+--------------------------------*/
 .container {
   max-width: 900px;
   margin: 40px auto;
@@ -14,44 +20,72 @@ body {
   box-shadow: 0 4px 12px rgba(0,0,0,0.1);
 }
 
+/* ------------------------------
+   HEADINGS
+--------------------------------*/
 h1 {
   margin-top: 0;
   text-align: center;
 }
 
+/* ------------------------------
+   TABLE BASE
+--------------------------------*/
 table {
   width: 100%;
   border-collapse: collapse;
   margin-top: 20px;
+  background: #fafafa;   /* ⭐ Light grey table background */
 }
 
+/* ------------------------------
+   TABLE HEADER
+--------------------------------*/
 table th {
   background: #333;
   color: white;
   padding: 12px;
   cursor: pointer;
+  border: 1px solid #222;
 }
 
+/* ------------------------------
+   TABLE CELLS
+--------------------------------*/
 table td {
   padding: 10px;
-  border-bottom: 1px solid #ddd;
+  border: 1px solid #ddd;   /* ⭐ Visible grid */
 }
 
+/* ------------------------------
+   ROW STRIPING
+--------------------------------*/
+table tr:nth-child(even) {
+  background: #f9f9f9;      /* ⭐ Subtle striped rows */
+}
+
+/* ------------------------------
+   ROW HOVER EFFECT
+--------------------------------*/
 table tr:hover {
   background: #f0f0f0;
 }
 
+/* ------------------------------
+   EV BADGES
+--------------------------------*/
 .ev-badge {
   padding: 6px 10px;
   border-radius: 6px;
   color: white;
   font-weight: bold;
+  display: inline-block;
 }
 
 .ev-positive {
-  background: #2ecc71;
+  background: #2ecc71;   /* Green */
 }
 
 .ev-negative {
-  background: #e74c3c;
+  background: #e74c3c;   /* Red */
 }
