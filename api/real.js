@@ -4,7 +4,6 @@
 async function getBetfairLayOdds(marketId, selectionId) {
   const url = `https://api.betfair.com/exchange/betting/rest/v1.0/listMarketBook/`;
 
-  // Betfair requires URL-encoded JSON for priceProjection
   const priceProjection = encodeURIComponent(
     JSON.stringify({ priceData: ["EX_BEST_OFFERS"] })
   );
@@ -14,11 +13,21 @@ async function getBetfairLayOdds(marketId, selectionId) {
   const res = await fetch(fullUrl, {
     method: "GET",
     headers: {
-      "X-Application": process.env.BETFAIR_APP_KEY,
-      "X-Authentication": process.env.BETFAIR_SESSION_TOKEN,
+      "X-Application": "1", // Public app key
       Accept: "application/json"
     }
   });
+
+  const data = await res.json();
+
+  const runner = data[0]?.runners?.find(r => r.selectionId === selectionId);
+
+  const layWin = runner?.ex?.availableToLay?.[0]?.price || null;
+  const layPlace = runner?.ex?.availableToLay?.[1]?.price || null;
+
+  return { layWin, layPlace };
+}
+
 
   // If Betfair returns HTML, this prevents JSON parse crash
   const text = await res.text();
