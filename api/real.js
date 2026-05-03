@@ -20,23 +20,11 @@ async function getBetfairLayOdds(marketId, selectionId) {
 
   const data = await res.json();
 
-  const runner = data[0]?.runners?.find(r => r.selectionId === selectionId);
-
-  const layWin = runner?.ex?.availableToLay?.[0]?.price || null;
-  const layPlace = runner?.ex?.availableToLay?.[1]?.price || null;
-
-  return { layWin, layPlace };
-}
-
-
-  // If Betfair returns HTML, this prevents JSON parse crash
-  const text = await res.text();
-  if (text.startsWith("<")) {
-    throw new Error("Betfair returned HTML (session expired or headers invalid)");
+  // If Betfair returns an empty array, avoid crashing
+  if (!Array.isArray(data) || data.length === 0) {
+    return { layWin: null, layPlace: null };
   }
 
-  const data = JSON.parse(text);
-
   const runner = data[0]?.runners?.find(r => r.selectionId === selectionId);
 
   const layWin = runner?.ex?.availableToLay?.[0]?.price || null;
@@ -44,6 +32,9 @@ async function getBetfairLayOdds(marketId, selectionId) {
 
   return { layWin, layPlace };
 }
+
+
+
 
 // -----------------------------
 // MAIN HANDLER
