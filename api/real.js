@@ -2,37 +2,49 @@
 // BETFAIR LAY ODDS FUNCTION
 // -----------------------------
 async function getBetfairLayOdds(marketId, selectionId) {
-  const url = `https://api.betfair.com/exchange/betting/rest/v1.0/listMarketBook/`;
+  const url = "https://api.betfair.com/exchange/betting/json-rpc/v1";
 
-  const priceProjection = encodeURIComponent(
-    JSON.stringify({ priceData: ["EX_BEST_OFFERS"] })
-  );
+  const body = {
+    jsonrpc: "2.0",
+    method: "SportsAPING/v1.0/listMarketBook",
+    params: {
+      marketIds: [marketId],
+      priceProjection: {
+        priceData: ["EX_BEST_OFFERS"]
+      }
+    },
+    id: 1
+  };
 
-  const fullUrl = `${url}?marketIds=${marketId}&priceProjection=${priceProjection}`;
-
-  const res = await fetch(fullUrl, {
-    method: "GET",
+  const res = await fetch(url, {
+    method: "POST",
     headers: {
-      "X-Application": "1", // Public app key
-      Accept: "application/json"
-    }
+      "X-Application": "1",
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(body)
   });
 
-  const data = await res.json();
+  const text = await res.text();
 
-  // If Betfair returns an empty array, avoid crashing
-  if (!Array.isArray(data) || data.length === 0) {
+  // If Betfair returns HTML, avoid crash
+  if (text.startsWith("<")) {
     return { layWin: null, layPlace: null };
   }
 
-  const runner = data[0]?.runners?.find(r => r.selectionId === selectionId);
+  const data = JSON.parse(text);
 
-  const layWin = runner?.ex?.availableToLay?.[0]?.price || null;
-  const layPlace = runner?.ex?.availableToLay?.[1]?.price || null;
+  const market = data?.result?.[0];
+  if (!market) return { layWin: null, layPlace: null };
+
+  const runner = market.runners?.find(r => r.selectionId === selectionId);
+  if (!runner) return { layWin: null, layPlace: null };
+
+  const layWin = runner.ex?.availableToLay?.[0]?.price || null;
+  const layPlace = runner.ex?.availableToLay?.[1]?.price || null;
 
   return { layWin, layPlace };
 }
-
 
 
 
