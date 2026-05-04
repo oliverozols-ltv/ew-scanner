@@ -135,6 +135,10 @@ export default async function handler(req, res) {
     }
 
     const betfairMarkets = await getBetfairMarkets();
+
+// DEBUG: print one market to Vercel logs
+console.log("BETFAIR MARKET SAMPLE:", JSON.stringify(betfairMarkets[0], null, 2));
+
     const rows = [];
 
     for (const race of gbIeRaces) {
