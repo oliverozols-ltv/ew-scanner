@@ -68,7 +68,6 @@ async function getBetfairMarkets() {
     params: {
       filter: {
         eventTypeIds: ["7"],
-        marketCountries: ["GB", "IE"],
         marketTypeCodes: ["WIN"]
       },
       maxResults: 300,
