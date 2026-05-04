@@ -1,4 +1,15 @@
-import racecardsData from "../../../data/racecards_today.json";
+import fs from "fs";
+import path from "path";
+
+// -----------------------------
+// Load local racecards JSON (today)
+// -----------------------------
+function loadRacecards() {
+  const filePath = path.join(process.cwd(), "data", "racecards_today.json");
+  const raw = fs.readFileSync(filePath, "utf8");
+  const json = JSON.parse(raw);
+  return json.racecards || [];
+}
 
 // -----------------------------
 // Betfair JSON-RPC: get market book (lay odds)
@@ -56,7 +67,7 @@ async function getBetfairMarkets() {
     method: "SportsAPING/v1.0/listMarketCatalogue",
     params: {
       filter: {
-        eventTypeIds: ["7"],        // Horse racing
+        eventTypeIds: ["7"],
         marketCountries: ["GB", "IE"],
         marketTypeCodes: ["WIN"]
       },
@@ -103,7 +114,6 @@ function findMatchingMarket(betfairMarkets, race) {
   return betfairMarkets.find(m => {
     const mCourse = m.event?.venue?.toLowerCase() || "";
     const mTime = m.marketStartTime?.substring(11, 16) || ""; // "HH:MM"
-    // Very loose: match course name and minute part
     return mCourse.includes(course) && mTime.endsWith(offTime.split(":")[1]);
   });
 }
@@ -113,9 +123,9 @@ function findMatchingMarket(betfairMarkets, race) {
 // -----------------------------
 export default async function handler(req, res) {
   try {
-    const racecards = racecardsData.racecards || [];
+    const racecards = loadRacecards();
 
-    // Filter to GB + IE only
+    // GB + IE only
     const gbIeRaces = racecards.filter(
       r => r.region === "GB" || r.region === "IE"
     );
@@ -150,7 +160,7 @@ export default async function handler(req, res) {
         rows.push({
           race: `${race.course} ${race.off_time}`,
           horse: horseName,
-          winOdds: null, // we’ll fill this from Odds API later
+          winOdds: null,
           placeFraction: 1 / 5,
           placesPaid: 3,
           layWin,
@@ -162,6 +172,7 @@ export default async function handler(req, res) {
 
     res.status(200).json(rows);
   } catch (err) {
+    console.error("REAL API ERROR:", err);
     res.status(500).json({
       error: "Failed to load real data",
       details: err.message
