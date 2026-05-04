@@ -1,4 +1,35 @@
 // -----------------------------
+// Racing API: Basic Auth header
+// -----------------------------
+function getRacingApiAuthHeader() {
+  const username = process.env.RACING_API_USERNAME;
+  const password = process.env.RACING_API_PASSWORD;
+  const token = Buffer.from(`${username}:${password}`).toString("base64");
+  return `Basic ${token}`;
+}
+
+// -----------------------------
+// Racing API: Fetch today's UK + IRE racecards
+// -----------------------------
+async function getRacingApiRacecards(date) {
+  const url = `https://api.theracingapi.com/v1/racecards?date=${date}&region=GB,IE`;
+
+  const res = await fetch(url, {
+    headers: {
+      Authorization: getRacingApiAuthHeader()
+    }
+  });
+
+  if (!res.ok) {
+    console.error("Racing API error:", await res.text());
+    return [];
+  }
+
+  const data = await res.json();
+  return data.races || [];
+}
+
+// -----------------------------
 // Betfair JSON-RPC: get market book (lay odds)
 // -----------------------------
 async function getBetfairLayOdds(marketId, selectionId) {
@@ -26,11 +57,7 @@ async function getBetfairLayOdds(marketId, selectionId) {
   });
 
   const text = await res.text();
-
-  // If Betfair ever returns HTML, avoid crashing
-  if (text.startsWith("<")) {
-    return { layWin: null, layPlace: null };
-  }
+  if (text.startsWith("<")) return { layWin: null, layPlace: null };
 
   const data = JSON.parse(text);
   const market = data?.result?.[0];
@@ -59,10 +86,10 @@ async function getBetfairMarkets() {
     params: {
       filter: {
         eventTypeIds: ["7"],        // Horse racing
-        marketCountries: ["GB"],    // UK
-        marketTypeCodes: ["WIN"]    // Win markets
+        marketCountries: ["GB", "IE"],
+        marketTypeCodes: ["WIN"]
       },
-      maxResults: 200,
+      maxResults: 300,
       marketProjection: ["RUNNER_DESCRIPTION", "MARKET_START_TIME", "EVENT"]
     },
     id: 1
@@ -96,101 +123,68 @@ function findMatchingRunner(betfairMarket, horseName) {
 }
 
 // -----------------------------
-// Helper: naive match event → Betfair market by name
+// Helper: match race → Betfair market by course + time
 // -----------------------------
-function findMatchingMarket(betfairMarkets, event) {
-  const name =
-    event.home_team ||
-    event.away_team ||
-    event.id ||
-    "";
+function findMatchingMarket(betfairMarkets, race) {
+  const course = race.course?.toLowerCase() || "";
+  const time = race.time?.substring(11, 16); // HH:MM
 
-  if (!name) return null;
-
-  const target = name.toLowerCase();
-
-  return betfairMarkets.find(
-    m =>
-      m.event &&
-      m.event.name &&
-      m.event.name.toLowerCase().includes(target)
-  );
+  return betfairMarkets.find(m => {
+    const mCourse = m.event?.venue?.toLowerCase() || "";
+    const mTime = m.marketStartTime?.substring(11, 16) || "";
+    return mCourse.includes(course) && mTime === time;
+  });
 }
 
 // -----------------------------
-// MAIN HANDLER
+// MAIN HANDLER — TODAY'S RACES
 // -----------------------------
 export default async function handler(req, res) {
   try {
-    // 1. Compute tomorrow's date (YYYY-MM-DD)
+    // 1. Compute today's date (YYYY-MM-DD)
     const now = new Date();
-    const tomorrow = new Date(now);
-    tomorrow.setDate(now.getDate() + 1);
+    const yyyy = now.getFullYear();
+    const mm = String(now.getMonth() + 1).padStart(2, "0");
+    const dd = String(now.getDate()).padStart(2, "0");
+    const today = `${yyyy}-${mm}-${dd}`;
 
-    const yyyy = tomorrow.getFullYear();
-    const mm = String(tomorrow.getMonth() + 1).padStart(2, "0");
-    const dd = String(tomorrow.getDate()).padStart(2, "0");
-
-    const tomorrowDate = `${yyyy}-${mm}-${dd}`;
-
-    // 2. Fetch bookmaker odds for tomorrow (UK horse racing)
-    const oddsRes = await fetch(
-      `https://api.the-odds-api.com/v4/sports/horse_racing/odds/?apiKey=${process.env.ODDS_API_KEY}&regions=uk&date=${tomorrowDate}`
-    );
-
-    const oddsData = await oddsRes.json();
-
-    if (!Array.isArray(oddsData) || oddsData.length === 0) {
+    // 2. Fetch racecards from Racing API
+    const racecards = await getRacingApiRacecards(today);
+    if (!racecards.length) {
       return res.status(200).json([]);
     }
 
-    // 3. Fetch Betfair markets (all UK WIN), then filter to tomorrow
-    const allBetfairMarkets = await getBetfairMarkets();
+    // 3. Fetch Betfair markets
+    const betfairMarkets = await getBetfairMarkets();
 
-    const betfairMarkets = allBetfairMarkets.filter(
-      m => m.marketStartTime && m.marketStartTime.startsWith(tomorrowDate)
-    );
+    const rows = [];
 
-    const races = [];
+    // 4. Loop through each race
+    for (const race of racecards) {
+      const betfairMarket = findMatchingMarket(betfairMarkets, race);
 
-    // 4. Loop through all bookmaker races
-    for (const event of oddsData) {
-      const raceName = event.home_team || event.id || "Unknown Race";
-
-      const bookmaker = event.bookmakers?.[0];
-      if (!bookmaker || !bookmaker.markets || bookmaker.markets.length === 0) {
-        continue;
-      }
-
-      const winMarket = bookmaker.markets[0];
-      if (!winMarket.outcomes) continue;
-
-      // Try to find matching Betfair market
-      const betfairMarket = findMatchingMarket(betfairMarkets, event);
-
-      for (const outcome of winMarket.outcomes) {
-        const horseName = outcome.name;
-        const winOdds = outcome.price;
+      for (const runner of race.runners) {
+        const horseName = runner.name;
 
         let layWin = null;
         let layPlace = null;
 
         if (betfairMarket) {
-          const runner = findMatchingRunner(betfairMarket, horseName);
-          if (runner) {
+          const matchedRunner = findMatchingRunner(betfairMarket, horseName);
+          if (matchedRunner) {
             const layPrices = await getBetfairLayOdds(
               betfairMarket.marketId,
-              runner.selectionId
+              matchedRunner.selectionId
             );
             layWin = layPrices.layWin;
             layPlace = layPrices.layPlace;
           }
         }
 
-        races.push({
-          race: raceName,
+        rows.push({
+          race: `${race.course} ${race.time.substring(11, 16)}`,
           horse: horseName,
-          winOdds,
+          winOdds: null, // will fill from Odds API later
           placeFraction: 1 / 5,
           placesPaid: 3,
           layWin,
@@ -200,7 +194,7 @@ export default async function handler(req, res) {
       }
     }
 
-    res.status(200).json(races);
+    res.status(200).json(rows);
   } catch (err) {
     res.status(500).json({
       error: "Failed to load real data",
