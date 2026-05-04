@@ -2,7 +2,7 @@ import fs from "fs";
 import path from "path";
 
 // -----------------------------
-// Load local racecards JSON (today)
+// Load local racecards JSON
 // -----------------------------
 function loadRacecards() {
   const filePath = path.join(process.cwd(), "data", "racecards_today.json");
@@ -12,119 +12,82 @@ function loadRacecards() {
 }
 
 // -----------------------------
-// Betfair JSON-RPC: get market book (lay odds)
+// Fetch ALL Betfair markets (public price API)
 // -----------------------------
-async function getBetfairLayOdds(marketId, selectionId) {
-  const url = "https://api.betfair.com/exchange/betting/json-rpc/v1";
+async function fetchBetfairPublic() {
+  const url = "https://api.betfair.com/exchange/readonly/v1/bymarket";
 
-  const body = {
-    jsonrpc: "2.0",
-    method: "SportsAPING/v1.0/listMarketBook",
-    params: {
-      marketIds: [marketId],
-      priceProjection: {
-        priceData: ["EX_BEST_OFFERS"]
-      }
-    },
-    id: 1
-  };
+  const res = await fetch(url);
+  const data = await res.json();
 
-  const res = await fetch(url, {
-    method: "POST",
-    headers: {
-      "X-Application": "1",
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify(body)
-  });
-
-  const text = await res.text();
-  if (text.startsWith("<")) return { layWin: null, layPlace: null };
-
-  const data = JSON.parse(text);
-  const market = data?.result?.[0];
-  if (!market || !market.runners) return { layWin: null, layPlace: null };
-
-  const runner = market.runners.find(r => r.selectionId === selectionId);
-  if (!runner || !runner.ex || !runner.ex.availableToLay) {
-    return { layWin: null, layPlace: null };
-  }
-
-  const layWin = runner.ex.availableToLay[0]?.price || null;
-  const layPlace = runner.ex.availableToLay[1]?.price || null;
-
-  return { layWin, layPlace };
+  // data is an object keyed by marketId
+  return Object.values(data);
 }
 
 // -----------------------------
-// Betfair JSON-RPC: get UK/IRE WIN markets
+// Normalise strings for matching
 // -----------------------------
-async function getBetfairMarkets() {
-  const url = "https://api.betfair.com/exchange/betting/json-rpc/v1";
-
-  const body = {
-    jsonrpc: "2.0",
-    method: "SportsAPING/v1.0/listMarketCatalogue",
-    params: {
-      filter: {
-        eventTypeIds: ["7"],
-        marketTypeCodes: ["WIN"]
-      },
-      maxResults: 300,
-      marketProjection: ["RUNNER_DESCRIPTION", "MARKET_START_TIME", "EVENT"]
-    },
-    id: 1
-  };
-
-  const res = await fetch(url, {
-    method: "POST",
-    headers: {
-      "X-Application": "1",
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify(body)
-  });
-
-  const text = await res.text();
-  if (text.startsWith("<")) return [];
-
-  const data = JSON.parse(text);
-  return data.result || [];
+function norm(str) {
+  return str
+    .toLowerCase()
+    .replace(/[\u0300-\u036f]/g, "") // remove accents
+    .replace(/[^a-z0-9 ]/g, "") // remove punctuation
+    .trim();
 }
 
 // -----------------------------
-// Helper: fuzzy match horse name to Betfair runner
+// Match Betfair market to race
 // -----------------------------
-function findMatchingRunner(betfairMarket, horseName) {
-  if (!betfairMarket?.runners) return null;
-  const target = horseName.toLowerCase();
-  return betfairMarket.runners.find(
-    r => r.runnerName && r.runnerName.toLowerCase().includes(target)
-  );
-}
-
-// -----------------------------
-// Helper: match race → Betfair market by course + time
-// -----------------------------
-function findMatchingMarket(betfairMarkets, race) {
-  const course = race.course?.toLowerCase() || "";
-  const offTime = race.off_time; // e.g. "3:35"
+function matchMarketToRace(betfairMarkets, race) {
+  const course = norm(race.course);
+  const offDt = new Date(race.off_dt); // local time with offset
+  const offUtc = offDt.toISOString().substring(0, 16); // "YYYY-MM-DDTHH:MM"
 
   return betfairMarkets.find(m => {
-    const mCourse = m.event?.venue?.toLowerCase() || "";
-    const mTime = m.marketStartTime?.substring(11, 16) || ""; // "HH:MM"
-    return mCourse.includes(course) && mTime.endsWith(offTime.split(":")[1]);
+    if (!m.event || !m.marketStartTime) return false;
+
+    const venue = norm(m.event.venue || "");
+    const mTime = m.marketStartTime.substring(0, 16);
+
+    const courseMatch = venue.includes(course);
+    const timeMatch =
+      mTime === offUtc ||
+      mTime.endsWith(race.off_time.padStart(5, "0"));
+
+    return courseMatch && timeMatch;
   });
 }
 
 // -----------------------------
-// MAIN HANDLER — TODAY FROM LOCAL FILE
+// Match runner to selectionId
+// -----------------------------
+function matchRunner(market, horseName) {
+  if (!market || !market.runners) return null;
+
+  const target = norm(horseName);
+
+  return market.runners.find(r => {
+    const rn = norm(r.runnerName || "");
+    return rn.includes(target) || target.includes(rn);
+  });
+}
+
+// -----------------------------
+// Extract lay price
+// -----------------------------
+function getLayPrice(runner) {
+  if (!runner || !runner.ex || !runner.ex.availableToLay) return null;
+  return runner.ex.availableToLay[0]?.price || null;
+}
+
+// -----------------------------
+// MAIN HANDLER
 // -----------------------------
 export default async function handler(req, res) {
   try {
     const racecards = loadRacecards();
 
-    // GB + IE only
+    // Only GB + IE races
     const gbIeRaces = racecards.filter(
       r => r.region === "GB" || r.region === "IE"
     );
@@ -133,37 +96,41 @@ export default async function handler(req, res) {
       return res.status(200).json([]);
     }
 
-    const betfairMarkets = await getBetfairMarkets();
+    // Fetch all Betfair markets
+    const allMarkets = await fetchBetfairPublic();
 
-// DEBUG: print one market to Vercel logs
-console.log("BETFAIR MARKET SAMPLE:", JSON.stringify(betfairMarkets[0], null, 2));
+    // Split into WIN and PLACE
+    const winMarkets = allMarkets.filter(m => m.marketName === "Win");
+    const placeMarkets = allMarkets.filter(m => m.marketName === "Place");
 
     const rows = [];
 
     for (const race of gbIeRaces) {
-      const betfairMarket = findMatchingMarket(betfairMarkets, race);
+      const winMarket = matchMarketToRace(winMarkets, race);
+      const placeMarket = matchMarketToRace(placeMarkets, race);
 
       for (const runner of race.runners) {
         const horseName = runner.horse;
+
         let layWin = null;
         let layPlace = null;
 
-        if (betfairMarket) {
-          const matchedRunner = findMatchingRunner(betfairMarket, horseName);
-          if (matchedRunner) {
-            const layPrices = await getBetfairLayOdds(
-              betfairMarket.marketId,
-              matchedRunner.selectionId
-            );
-            layWin = layPrices.layWin;
-            layPlace = layPrices.layPlace;
-          }
+        // WIN lay odds
+        if (winMarket) {
+          const matched = matchRunner(winMarket, horseName);
+          layWin = getLayPrice(matched);
+        }
+
+        // PLACE lay odds
+        if (placeMarket) {
+          const matched = matchRunner(placeMarket, horseName);
+          layPlace = getLayPrice(matched);
         }
 
         rows.push({
           race: `${race.course} ${race.off_time}`,
           horse: horseName,
-          winOdds: null,
+          winOdds: null, // bookmaker odds later
           placeFraction: 1 / 5,
           placesPaid: 3,
           layWin,
