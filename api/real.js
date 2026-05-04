@@ -12,19 +12,6 @@ function loadRacecards() {
 }
 
 // -----------------------------
-// Fetch ALL Betfair markets (public price API)
-// -----------------------------
-async function fetchBetfairPublic() {
-  const url = "https://api.betfair.com/exchange/readonly/v1/bymarket";
-
-  const res = await fetch(url);
-  const data = await res.json();
-
-  // data is an object keyed by marketId
-  return Object.values(data);
-}
-
-// -----------------------------
 // Normalise strings for matching
 // -----------------------------
 function norm(str) {
@@ -36,14 +23,68 @@ function norm(str) {
 }
 
 // -----------------------------
+// Fetch Betfair market catalogue (WIN + PLACE)
+// -----------------------------
+async function fetchMarketCatalogue() {
+  const url = "https://api.betfair.com/exchange/readonly/v1/listMarketCatalogue";
+
+  const body = {
+    filter: {
+      eventTypeIds: ["7"], // horse racing
+      marketTypeCodes: ["WIN", "PLACE"]
+    },
+    maxResults: 300,
+    marketProjection: ["RUNNER_DESCRIPTION", "MARKET_START_TIME", "EVENT"]
+  };
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
+
+  const text = await res.text();
+  if (text.startsWith("<")) return [];
+
+  const data = JSON.parse(text);
+  return data.result || [];
+}
+
+// -----------------------------
+// Fetch prices for a single marketId
+// -----------------------------
+async function fetchMarketBook(marketId) {
+  const url = "https://api.betfair.com/exchange/readonly/v1/listMarketBook";
+
+  const body = {
+    marketIds: [marketId],
+    priceProjection: {
+      priceData: ["EX_BEST_OFFERS"]
+    }
+  };
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
+
+  const text = await res.text();
+  if (text.startsWith("<")) return null;
+
+  const data = JSON.parse(text);
+  return data.result?.[0] || null;
+}
+
+// -----------------------------
 // Match Betfair market to race
 // -----------------------------
-function matchMarketToRace(betfairMarkets, race) {
+function matchMarketToRace(markets, race) {
   const course = norm(race.course);
-  const offDt = new Date(race.off_dt); // local time with offset
+  const offDt = new Date(race.off_dt);
   const offUtc = offDt.toISOString().substring(0, 16); // "YYYY-MM-DDTHH:MM"
 
-  return betfairMarkets.find(m => {
+  return markets.find(m => {
     if (!m.event || !m.marketStartTime) return false;
 
     const venue = norm(m.event.venue || "");
@@ -96,12 +137,12 @@ export default async function handler(req, res) {
       return res.status(200).json([]);
     }
 
-    // Fetch all Betfair markets
-    const allMarkets = await fetchBetfairPublic();
+    // Fetch Betfair catalogue
+    const catalogue = await fetchMarketCatalogue();
 
-    // Split into WIN and PLACE
-    const winMarkets = allMarkets.filter(m => m.marketName === "Win");
-    const placeMarkets = allMarkets.filter(m => m.marketName === "Place");
+    // Split into WIN + PLACE
+    const winMarkets = catalogue.filter(m => m.marketName === "Win");
+    const placeMarkets = catalogue.filter(m => m.marketName === "Place");
 
     const rows = [];
 
@@ -109,28 +150,30 @@ export default async function handler(req, res) {
       const winMarket = matchMarketToRace(winMarkets, race);
       const placeMarket = matchMarketToRace(placeMarkets, race);
 
+      // Fetch prices only for matched markets
+      const winBook = winMarket ? await fetchMarketBook(winMarket.marketId) : null;
+      const placeBook = placeMarket ? await fetchMarketBook(placeMarket.marketId) : null;
+
       for (const runner of race.runners) {
         const horseName = runner.horse;
 
         let layWin = null;
         let layPlace = null;
 
-        // WIN lay odds
-        if (winMarket) {
-          const matched = matchRunner(winMarket, horseName);
+        if (winBook) {
+          const matched = matchRunner(winBook, horseName);
           layWin = getLayPrice(matched);
         }
 
-        // PLACE lay odds
-        if (placeMarket) {
-          const matched = matchRunner(placeMarket, horseName);
+        if (placeBook) {
+          const matched = matchRunner(placeBook, horseName);
           layPlace = getLayPrice(matched);
         }
 
         rows.push({
           race: `${race.course} ${race.off_time}`,
           horse: horseName,
-          winOdds: null, // bookmaker odds later
+          winOdds: null,
           placeFraction: 1 / 5,
           placesPaid: 3,
           layWin,
