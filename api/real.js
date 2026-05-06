@@ -35,15 +35,22 @@ async function betfairRequest(method, params) {
     id: 1
   };
 
-  const res = await fetch(url, {
-    method: "POST",
-    headers: {
-      "X-Application": process.env.BETFAIR_APP_KEY,
-      "X-Authentication": process.env.BETFAIR_SESSION_TOKEN,
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify(body)
-  });
+  // Decode the base64-encoded session token from Vercel
+const sessionToken = Buffer.from(
+  process.env.BETFAIR_SESSION_TOKEN_B64,
+  "base64"
+).toString("utf8");
+
+const res = await fetch(url, {
+  method: "POST",
+  headers: {
+    "X-Application": process.env.BETFAIR_APP_KEY,
+    "X-Authentication": sessionToken,
+    "Content-Type": "application/json"
+  },
+  body: JSON.stringify(body)
+});
+
 
   const text = await res.text();
 
